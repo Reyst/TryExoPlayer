@@ -1,0 +1,110 @@
+package reyst.gsihome.exo
+
+import android.net.Uri
+import android.os.Bundle
+import android.support.v7.app.AppCompatActivity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import com.daasuu.epf.EPlayerView
+import com.daasuu.epf.filter.GlFilter
+import com.google.android.exoplayer2.ExoPlayerFactory
+import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.SimpleExoPlayer
+import com.google.android.exoplayer2.source.hls.HlsMediaSource
+import com.google.android.exoplayer2.trackselection.AdaptiveTrackSelection
+import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
+import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
+import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory
+import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
+import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory
+import com.google.android.exoplayer2.util.Util
+
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var player: SimpleExoPlayer
+    private lateinit var ePlayerView: EPlayerView
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        val bandwidthMeter = DefaultBandwidthMeter()
+        val videoTrackSelectionFactory = AdaptiveTrackSelection.Factory(bandwidthMeter)
+        val trackSelector = DefaultTrackSelector(videoTrackSelectionFactory)
+
+        // 3. Create the player
+        player = ExoPlayerFactory.newSimpleInstance(this, trackSelector)
+
+        val url = "https://player.vimeo.com/external/276426755.m3u8?s\u003d9e53dc04f76f25c0ffd3e9fc3e6e762ed38c6c05\u0026oauth2_token_id\u003d1167604692"
+
+        val mp4VideoUri = Uri.parse(url)
+        val userAgent = Util.getUserAgent(this, applicationInfo.name)
+
+        // Default parameters, except allowCrossProtocolRedirects is true
+        val httpDataSourceFactory = DefaultHttpDataSourceFactory(
+            userAgent,
+            null /* listener */,
+            DefaultHttpDataSource.DEFAULT_CONNECT_TIMEOUT_MILLIS,
+            DefaultHttpDataSource.DEFAULT_READ_TIMEOUT_MILLIS,
+            true /* allowCrossProtocolRedirects */
+        )
+
+        val dataSourceFactory = DefaultDataSourceFactory(
+            this, null,
+            httpDataSourceFactory
+        )/* listener */
+
+        val source = HlsMediaSource.Factory(dataSourceFactory).createMediaSource(mp4VideoUri)
+
+        // Prepare the player with the source.
+        player.repeatMode = Player.REPEAT_MODE_ALL
+        player.prepare(source)
+
+        player.playWhenReady = true
+
+        ePlayerView = EPlayerView(this)
+        // set SimpleExoPlayer
+        ePlayerView.setSimpleExoPlayer(player)
+        ePlayerView.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        // add ePlayerView to WrapperView
+        findViewById<FrameLayout>(R.id.content).addView(ePlayerView)
+
+        //        ePlayerView.setGlFilter(VimeoMaskFilter())
+    }
+
+    override fun onResume() {
+        super.onResume()
+        ePlayerView.onResume()
+    }
+}
+
+class VimeoMaskFilter : GlFilter(GlFilter.DEFAULT_VERTEX_SHADER, MASK_SHADER) {
+    companion object {
+        private const val INVERT_SHADER = "precision mediump float;" +
+            "varying vec2 vTextureCoord;" +
+            "uniform lowp sampler2D sTexture;" +
+            "void main() {" +
+            "lowp vec4 color = texture2D(sTexture, vTextureCoord);" +
+            "gl_FragColor = vec4((1.0 - color.rgb), color.w);" +
+            "}"
+
+        private const val MASK_SHADER =
+            "#extension GL_OES_EGL_image_external : require\n" +
+                "        precision mediump float;\n" +
+                "        varying vec2 vTextureCoord;\n" +
+                "        vec2 maskTextureCoord;\n" +
+                "        uniform samplerExternalOES sTexture;\n" +
+                "        void main() {\n" +
+                "            vec4 color = texture2D(sTexture, vTextureCoord);\n" +
+                "            maskTextureCoord = vec2(vTextureCoord.x,vTextureCoord.y+0.5);\n" +
+                "            vec4 maskColor = texture2D(sTexture, maskTextureCoord);\n" +
+                "\n" +
+                "            float a = 1.0;\n" +
+                "            if((maskColor.r + maskColor.g + maskColor.b) / 3.0 < 0.5){\n" +
+                "               a = 0.0;\n" +
+                "            };\n" +
+                "            gl_FragColor = vec4(color.r, color.g, color.b, a);\n" +
+                "        }"
+    }
+}
