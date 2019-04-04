@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.support.v7.app.AppCompatActivity
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import com.daasuu.epf.EFramebufferObject
 import com.daasuu.epf.EPlayerView
 import com.daasuu.epf.filter.GlFilter
 import com.google.android.exoplayer2.ExoPlayerFactory
@@ -70,7 +71,7 @@ class MainActivity : AppCompatActivity() {
         // add ePlayerView to WrapperView
         findViewById<FrameLayout>(R.id.content).addView(ePlayerView)
 
-        //        ePlayerView.setGlFilter(VimeoMaskFilter())
+        ePlayerView.setGlFilter(VimeoMaskFilter())
     }
 
     override fun onResume() {
@@ -79,15 +80,19 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-class VimeoMaskFilter : GlFilter(GlFilter.DEFAULT_VERTEX_SHADER, MASK_SHADER) {
+class VimeoMaskFilter : GlFilter(VERTEX_SHADER, MASK_SHADER) {
     companion object {
-        private const val INVERT_SHADER = "precision mediump float;" +
-            "varying vec2 vTextureCoord;" +
-            "uniform lowp sampler2D sTexture;" +
-            "void main() {" +
-            "lowp vec4 color = texture2D(sTexture, vTextureCoord);" +
-            "gl_FragColor = vec4((1.0 - color.rgb), color.w);" +
-            "}"
+
+        private const val VERTEX_SHADER =
+                "uniform mat4 uMVPMatrix;\n" +
+                "uniform mat4 uSTMatrix;\n" +
+                "attribute vec4 aPosition;\n" +
+                "attribute vec4 aTextureCoord;\n" +
+                "varying vec2 vTextureCoord;\n" +
+                "void main() {\n" +
+                "  gl_Position = uMVPMatrix * aPosition;\n" +
+                "  vTextureCoord = (uSTMatrix * aTextureCoord).xy;\n" +
+                "}\n"
 
         private const val MASK_SHADER =
             "#extension GL_OES_EGL_image_external : require\n" +
@@ -106,5 +111,96 @@ class VimeoMaskFilter : GlFilter(GlFilter.DEFAULT_VERTEX_SHADER, MASK_SHADER) {
                 "            };\n" +
                 "            gl_FragColor = vec4(color.r, color.g, color.b, a);\n" +
                 "        }"
+
+        private const val FLOAT_SIZE_BYTES = 4
+        private const val TRIANGLE_VERTICES_DATA_STRIDE_BYTES = 5 * FLOAT_SIZE_BYTES
+        private const val TRIANGLE_VERTICES_DATA_POS_OFFSET = 0
+        private const val TRIANGLE_VERTICES_DATA_UV_OFFSET = 3
+
+        private const val GL_TEXTURE_EXTERNAL_OES = 0x8D65
+
     }
+
+    private val triangleVerticesData = floatArrayOf(
+        // X, Y, Z, U, V
+        -1.0f, -1.0f, 0f, 0f, 0f, 1.0f, -1.0f, 0f, 1f, 0f, -1.0f, 1.0f, 0f, 0f, 1f, 1.0f, 1.0f, 0f, 1f, 1f
+    )
+
+    private val triangleVertices: FloatBuffer
+
+    private val mVPMatrix = FloatArray(16)
+    private val sTMatrix = FloatArray(16)
+
+    private var textureID: Int = 0
+
+    init {
+        triangleVertices = ByteBuffer.allocateDirect(
+            triangleVerticesData.size * FLOAT_SIZE_BYTES
+        )
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+        triangleVertices.put(triangleVerticesData).position(0)
+
+        Matrix.setIdentityM(sTMatrix, 0)
+    }
+
+    override fun setup() {
+        super.setup()
+
+        val textures = IntArray(1)
+        GLES20.glGenTextures(1, textures, 0)
+
+        textureID = textures[0]
+        GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureID)
+
+        GLES20.glTexParameterf(
+            GL_TEXTURE_EXTERNAL_OES,
+            GLES20.GL_TEXTURE_MIN_FILTER,
+            GLES20.GL_NEAREST.toFloat()
+        )
+
+        GLES20.glTexParameterf(
+            GL_TEXTURE_EXTERNAL_OES,
+            GLES20.GL_TEXTURE_MAG_FILTER,
+            GLES20.GL_LINEAR.toFloat()
+        )
+    }
+
+    override fun draw(texName: Int, fbo: EFramebufferObject?) {
+
+//        GLES20.glClear(GLES20.GL_DEPTH_BUFFER_BIT or GLES20.GL_COLOR_BUFFER_BIT)
+
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
+
+        useProgram()
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureID)
+
+        triangleVertices.position(TRIANGLE_VERTICES_DATA_POS_OFFSET)
+        GLES20.glVertexAttribPointer(
+            getHandle("aPosition"), 3, GLES20.GL_FLOAT, false,
+            TRIANGLE_VERTICES_DATA_STRIDE_BYTES, triangleVertices
+        )
+        GLES20.glEnableVertexAttribArray(getHandle("aPosition"))
+
+        triangleVertices.position(TRIANGLE_VERTICES_DATA_UV_OFFSET)
+        GLES20.glVertexAttribPointer(
+            getHandle("aTextureCoord"), 3, GLES20.GL_FLOAT, false,
+            TRIANGLE_VERTICES_DATA_STRIDE_BYTES, triangleVertices
+        )
+        GLES20.glEnableVertexAttribArray(getHandle("aTextureCoord"))
+
+        Matrix.setIdentityM(mVPMatrix, 0)
+        GLES20.glUniformMatrix4fv(getHandle("uMVPMatrix"), 1, false, mVPMatrix, 0)
+        GLES20.glUniformMatrix4fv(getHandle("uSTMatrix"), 1, false, sTMatrix, 0)
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+//        GLES20.glFinish()
+
+    }
+
+
 }
